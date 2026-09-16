@@ -11,6 +11,7 @@ on:
 jobs:
   before-and-after:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,7 +48,11 @@ jobs:
           helm repo update
           kubectl create namespace chaos-mesh
           helm install chaos-mesh chaos-mesh/chaos-mesh \
-            --namespace=chaos-mesh --set dashboard.create=false --wait --timeout 5m
+            --namespace=chaos-mesh \
+            --set dashboard.create=false \
+            --set chaosDaemon.runtime=containerd \
+            --set chaosDaemon.socketPath=/run/containerd/containerd.sock \
+            --wait --timeout 5m
 
       - name: Install validation dependencies
         run: pip install --user httpx
@@ -55,7 +60,13 @@ jobs:
       - name: "BEFORE - naive mode, network partition (expected to fail)"
         continue-on-error: true
         run: |
+          # order-api's own resilience would otherwise mask a naive
+          # payment-api's failures (verified separately - see
+          # docs/architecture.md), so both hops go naive here to actually
+          # surface the failure at the edge validate.py measures.
+          kubectl -n resilience-lab set env deployment/order-api RESILIENT_MODE=false
           kubectl -n resilience-lab set env deployment/payment-api RESILIENT_MODE=false
+          kubectl -n resilience-lab rollout status deployment/order-api --timeout=60s
           kubectl -n resilience-lab rollout status deployment/payment-api --timeout=60s
           docker run -d --rm --network host --name k6-before \
             -e BASE_URL=http://localhost:8080 -e K6_DURATION=75s \
@@ -67,7 +78,9 @@ jobs:
 
       - name: "AFTER - resilient mode, same network partition (expected to pass)"
         run: |
+          kubectl -n resilience-lab set env deployment/order-api RESILIENT_MODE=true
           kubectl -n resilience-lab set env deployment/payment-api RESILIENT_MODE=true
+          kubectl -n resilience-lab rollout status deployment/order-api --timeout=60s
           kubectl -n resilience-lab rollout status deployment/payment-api --timeout=60s
           docker run -d --rm --network host --name k6-after \
             -e BASE_URL=http://localhost:8080 -e K6_DURATION=75s \

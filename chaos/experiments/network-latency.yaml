@@ -1,0 +1,27 @@
+# Hypothesis: p99 stays under 2s at the order-api edge despite 800ms of
+# injected latency between payment-api and inventory-api.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: payment-inventory-latency
+  namespace: resilience-lab
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces:
+      - resilience-lab
+    labelSelectors:
+      app: payment-api
+  delay:
+    latency: "800ms"
+    jitter: "50ms"
+  direction: to
+  target:
+    mode: all
+    selector:
+      namespaces:
+        - resilience-lab
+      labelSelectors:
+        app: inventory-api
+  duration: "60s"

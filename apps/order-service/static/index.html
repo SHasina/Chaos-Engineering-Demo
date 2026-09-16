@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Order Service — Resilience Dashboard</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>order-service &rarr; payment-service &rarr; inventory-service</h1>
+    <p>resilient mode: <span id="mode-value">&mdash;</span></p>
+  </header>
+  <main>
+    <section class="chain">
+      <div class="node" id="node-order"><h2>order-service</h2><p class="state">&mdash;</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node" id="node-payment"><h2>payment-service</h2><p class="state">&mdash;</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node" id="node-inventory"><h2>inventory-service</h2><p class="state">&mdash;</p></div>
+    </section>
+    <section class="stats">
+      <div class="stat"><span class="label">Last latency</span><span class="value" id="latency">&mdash;</span></div>
+      <div class="stat"><span class="label">Availability (last 30)</span><span class="value" id="availability">&mdash;</span></div>
+      <div class="stat"><span class="label">Requests polled</span><span class="value" id="count">0</span></div>
+    </section>
+    <section class="log">
+      <h2>Recent orders</h2>
+      <ul id="log"></ul>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

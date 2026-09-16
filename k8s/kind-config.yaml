@@ -1,0 +1,17 @@
+# Single control-plane node by design: this reference architecture is meant
+# to run on a single laptop alongside everything else on it. A multi-node
+# cluster buys nothing for this demo and costs real memory.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      - containerPort: 30090
+        hostPort: 9090
+        protocol: TCP
+      - containerPort: 30030
+        hostPort: 3000
+        protocol: TCP

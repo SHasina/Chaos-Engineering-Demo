@@ -1,0 +1,15 @@
+# Hypothesis: the order chain keeps confirming orders when one payment-api
+# pod is killed, because a second replica is already serving traffic.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: payment-pod-kill
+  namespace: resilience-lab
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces:
+      - resilience-lab
+    labelSelectors:
+      app: payment-api

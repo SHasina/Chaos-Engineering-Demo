@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: resilience-lab
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-svc.resilience-lab.svc.cluster.local:9090
+        isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: resilience-lab
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: resilience-lab
+        folder: ""
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards

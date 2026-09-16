@@ -1,0 +1,93 @@
+name: Chaos Validation Pipeline
+
+# This is a resilience gate, not a smoke test: it stands up the full chain
+# in an ephemeral kind cluster, generates real traffic with k6, injects
+# each chaos experiment against that traffic, and fails the build if
+# recovery exceeds the stated SLA. It runs before anything would be
+# considered deployable, not after.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  resilience-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build service images
+        run: |
+          docker build -t order-api:local ./apps/order-service
+          docker build -t payment-api:local ./apps/payment-service
+          docker build -t inventory-api:local ./apps/inventory-service
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          config: k8s/kind-config.yaml
+          cluster_name: chaos-lab
+
+      - name: Load images into kind
+        run: |
+          kind load docker-image order-api:local payment-api:local inventory-api:local --name chaos-lab
+
+      - name: Deploy the application
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/rbac/
+          kubectl apply -f k8s/order/
+          kubectl apply -f k8s/payment/
+          kubectl apply -f k8s/inventory/
+          kubectl -n resilience-lab rollout status deployment/order-api --timeout=120s
+          kubectl -n resilience-lab rollout status deployment/payment-api --timeout=120s
+          kubectl -n resilience-lab rollout status deployment/inventory-api --timeout=120s
+
+      - name: Install Chaos Mesh
+        run: |
+          helm repo add chaos-mesh https://charts.chaos-mesh.org
+          helm repo update
+          kubectl create namespace chaos-mesh
+          helm install chaos-mesh chaos-mesh/chaos-mesh \
+            --namespace=chaos-mesh \
+            --set dashboard.create=false \
+            --set chaosDaemon.runtime=containerd \
+            --set chaosDaemon.socketPath=/run/containerd/containerd.sock \
+            --wait --timeout 5m
+
+      - name: Install validation dependencies
+        run: pip install --user httpx
+
+      - name: "Experiment 1/3: pod kill"
+        run: |
+          docker run -d --rm --network host --name k6-run-1 \
+            -e BASE_URL=http://localhost:8080 -e K6_DURATION=45s \
+            -v ${{ github.workspace }}/load/k6:/scripts grafana/k6 run /scripts/script.js
+          kubectl apply -f chaos/experiments/pod-kill.yaml
+          python3 chaos/validate.py --url http://localhost:8080/orders --duration 45 --recover-within 30
+          kubectl delete -f chaos/experiments/pod-kill.yaml --ignore-not-found
+          docker wait k6-run-1 || true
+
+      - name: "Experiment 2/3: network latency"
+        run: |
+          docker run -d --rm --network host --name k6-run-2 \
+            -e BASE_URL=http://localhost:8080 -e K6_DURATION=75s \
+            -v ${{ github.workspace }}/load/k6:/scripts grafana/k6 run /scripts/script.js
+          kubectl apply -f chaos/experiments/network-latency.yaml
+          python3 chaos/validate.py --url http://localhost:8080/orders --duration 75 --recover-within 30
+          kubectl delete -f chaos/experiments/network-latency.yaml --ignore-not-found
+          docker wait k6-run-2 || true
+
+      - name: "Experiment 3/3: network partition"
+        run: |
+          docker run -d --rm --network host --name k6-run-3 \
+            -e BASE_URL=http://localhost:8080 -e K6_DURATION=75s \
+            -v ${{ github.workspace }}/load/k6:/scripts grafana/k6 run /scripts/script.js
+          kubectl apply -f chaos/experiments/network-partition.yaml
+          python3 chaos/validate.py --url http://localhost:8080/orders --duration 75 --recover-within 30
+          kubectl delete -f chaos/experiments/network-partition.yaml --ignore-not-found
+          docker wait k6-run-3 || true
+
+      - name: Tear down cluster
+        if: always()
+        run: kind delete cluster --name chaos-lab

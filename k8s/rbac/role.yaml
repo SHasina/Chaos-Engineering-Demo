@@ -1,0 +1,17 @@
+# The governance model this reference architecture demonstrates: a platform
+# team owns the chaos experiment templates (the YAML in chaos/experiments/),
+# and only a scoped service account is permitted to create, run, or delete
+# them inside this namespace. In a real rollout, CI/CD pipeline identities
+# bind to this role — not individual engineers' kubeconfigs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chaos-operator
+  namespace: resilience-lab
+rules:
+  - apiGroups: ["chaos-mesh.org"]
+    resources: ["podchaos", "networkchaos", "schedules", "workflows"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]

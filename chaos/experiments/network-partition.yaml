@@ -1,0 +1,26 @@
+# Hypothesis: payment-api (and therefore order-api) degrades gracefully
+# when inventory-api is completely unreachable, instead of hanging or
+# returning an unhandled error. With RESILIENT_MODE=false this hypothesis
+# is expected to fail on the first run - that failure is the finding.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: payment-inventory-partition
+  namespace: resilience-lab
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces:
+      - resilience-lab
+    labelSelectors:
+      app: payment-api
+  direction: both
+  target:
+    mode: all
+    selector:
+      namespaces:
+        - resilience-lab
+      labelSelectors:
+        app: inventory-api
+  duration: "60s"

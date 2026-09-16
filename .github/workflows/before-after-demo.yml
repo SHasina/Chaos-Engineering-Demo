@@ -1,0 +1,82 @@
+name: Before/After Resilience Demo
+
+# Not a regression gate - chaos-pipeline.yml is that. This workflow exists
+# to show the naive and resilient code paths side by side, on the same
+# network-partition experiment, so the contrast can be narrated live from
+# the run's own logs: the naive step is expected to fail, and is marked
+# continue-on-error so the job still completes after it.
+on:
+  workflow_dispatch:
+
+jobs:
+  before-and-after:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build service images
+        run: |
+          docker build -t order-api:local ./apps/order-service
+          docker build -t payment-api:local ./apps/payment-service
+          docker build -t inventory-api:local ./apps/inventory-service
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          config: k8s/kind-config.yaml
+          cluster_name: chaos-lab
+
+      - name: Load images into kind
+        run: kind load docker-image order-api:local payment-api:local inventory-api:local --name chaos-lab
+
+      - name: Deploy the application
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/rbac/
+          kubectl apply -f k8s/order/
+          kubectl apply -f k8s/payment/
+          kubectl apply -f k8s/inventory/
+          kubectl -n resilience-lab rollout status deployment/order-api --timeout=120s
+          kubectl -n resilience-lab rollout status deployment/payment-api --timeout=120s
+          kubectl -n resilience-lab rollout status deployment/inventory-api --timeout=120s
+
+      - name: Install Chaos Mesh
+        run: |
+          helm repo add chaos-mesh https://charts.chaos-mesh.org
+          helm repo update
+          kubectl create namespace chaos-mesh
+          helm install chaos-mesh chaos-mesh/chaos-mesh \
+            --namespace=chaos-mesh --set dashboard.create=false --wait --timeout 5m
+
+      - name: Install validation dependencies
+        run: pip install --user httpx
+
+      - name: "BEFORE - naive mode, network partition (expected to fail)"
+        continue-on-error: true
+        run: |
+          kubectl -n resilience-lab set env deployment/payment-api RESILIENT_MODE=false
+          kubectl -n resilience-lab rollout status deployment/payment-api --timeout=60s
+          docker run -d --rm --network host --name k6-before \
+            -e BASE_URL=http://localhost:8080 -e K6_DURATION=75s \
+            -v ${{ github.workspace }}/load/k6:/scripts grafana/k6 run /scripts/script.js
+          kubectl apply -f chaos/experiments/network-partition.yaml
+          python3 chaos/validate.py --url http://localhost:8080/orders --duration 75 --recover-within 30
+          kubectl delete -f chaos/experiments/network-partition.yaml --ignore-not-found
+          docker wait k6-before || true
+
+      - name: "AFTER - resilient mode, same network partition (expected to pass)"
+        run: |
+          kubectl -n resilience-lab set env deployment/payment-api RESILIENT_MODE=true
+          kubectl -n resilience-lab rollout status deployment/payment-api --timeout=60s
+          docker run -d --rm --network host --name k6-after \
+            -e BASE_URL=http://localhost:8080 -e K6_DURATION=75s \
+            -v ${{ github.workspace }}/load/k6:/scripts grafana/k6 run /scripts/script.js
+          kubectl apply -f chaos/experiments/network-partition.yaml
+          python3 chaos/validate.py --url http://localhost:8080/orders --duration 75 --recover-within 30
+          kubectl delete -f chaos/experiments/network-partition.yaml --ignore-not-found
+          docker wait k6-after || true
+
+      - name: Tear down cluster
+        if: always()
+        run: kind delete cluster --name chaos-lab

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: resilience-lab
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+      evaluation_interval: 5s
+
+    scrape_configs:
+      - job_name: order-api
+        static_configs:
+          - targets: ["order-api-svc.resilience-lab.svc.cluster.local:8000"]
+      - job_name: payment-api
+        static_configs:
+          - targets: ["payment-api-svc.resilience-lab.svc.cluster.local:8000"]
+      - job_name: inventory-api
+        static_configs:
+          - targets: ["inventory-api-svc.resilience-lab.svc.cluster.local:8000"]

@@ -202,6 +202,6 @@ boundary, not a convention.
 testing. Level 1: manual, occasional experiments. Level 2: scheduled
 GameDays. **Level 3: CI/CD-gated** - the level this repository operates at,
 where `chaos-pipeline.yml` blocks a regression on every push. Level 4:
-continuous, RBAC-scoped verification in production, feeding the error
+continuous, RBAC-scoped verification in production, feeding the error.
 budget directly - the target state this reference architecture is designed
 to grow into, not something it runs today.

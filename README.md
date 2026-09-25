@@ -205,3 +205,63 @@ where `chaos-pipeline.yml` blocks a regression on every push. Level 4:
 continuous, RBAC-scoped verification in production, feeding the error.
 budget directly - the target state this reference architecture is designed
 to grow into, not something it runs today.
+
+
+** Commands for Local Testing:**
+
+
+http://localhost:8080 (the live order UI — this is what's already generating traffic)
+http://localhost:3000 → "Resilience Lab" dashboard (admin/admin)
+
+
+cd C:\Users\HP\Chaos-Engineering
+
+pod-kill ("Request rate by service")
+
+docker run -d --rm --name k6-run -e BASE_URL=http://host.docker.internal:8080 -e K6_DURATION=45s -v "${PWD}\load\k6:/scripts" grafana/k6 run /scripts/script.js
+kubectl apply -f chaos/experiments/pod-kill.yaml
+python chaos/validate.py --url http://localhost:8080/orders --duration 45 --recover-within 30
+kubectl delete -f chaos/experiments/pod-kill.yaml
+
+network-latency ("p95 latency by service", payment-api line)
+
+docker run -d --rm --name k6-run -e BASE_URL=http://host.docker.internal:8080 -e K6_DURATION=75s -v "${PWD}\load\k6:/scripts" grafana/k6 run /scripts/script.js
+kubectl apply -f chaos/experiments/network-latency.yaml
+python chaos/validate.py --url http://localhost:8080/orders --duration 75 --recover-within 30
+kubectl delete -f chaos/experiments/network-latency.yaml
+
+network-partition, both resilient → PASS
+
+docker run -d --rm --name k6-run -e BASE_URL=http://host.docker.internal:8080 -e K6_DURATION=75s -v "${PWD}\load\k6:/scripts" grafana/k6 run /scripts/script.js
+kubectl apply -f chaos/experiments/network-partition.yaml
+python chaos/validate.py --url http://localhost:8080/orders --duration 75 --recover-within 30
+kubectl delete -f chaos/experiments/network-partition.yaml
+
+Act 3b — payment-api naive only, order-api still resilient → PASS but degraded
+
+kubectl -n resilience-lab set env deployment/payment-api RESILIENT_MODE=false
+kubectl -n resilience-lab rollout status deployment/payment-api --timeout=60s
+
+docker run -d --rm --name k6-run -e BASE_URL=http://host.docker.internal:8080 -e K6_DURATION=75s -v "${PWD}\load\k6:/scripts" grafana/k6 run /scripts/script.js
+kubectl apply -f chaos/experiments/network-partition.yaml
+curl.exe -s http://localhost:8080/orders
+python chaos/validate.py --url http://localhost:8080/orders --duration 70 --recover-within 30
+kubectl delete -f chaos/experiments/network-partition.yaml
+
+
+Act 3c — both naive → real FAIL
+
+kubectl -n resilience-lab set env deployment/order-api RESILIENT_MODE=false
+kubectl -n resilience-lab rollout status deployment/order-api --timeout=60s
+
+docker run -d --rm --name k6-run -e BASE_URL=http://host.docker.internal:8080 -e K6_DURATION=75s -v "${PWD}\load\k6:/scripts" grafana/k6 run /scripts/script.js
+kubectl apply -f chaos/experiments/network-partition.yaml
+python chaos/validate.py --url http://localhost:8080/orders --duration 75 --recover-within 30
+kubectl delete -f chaos/experiments/network-partition.yaml
+
+Reset to baseline
+
+kubectl -n resilience-lab set env deployment/order-api RESILIENT_MODE=true
+kubectl -n resilience-lab set env deployment/payment-api RESILIENT_MODE=true
+kubectl -n resilience-lab rollout status deployment/order-api --timeout=60s
+kubectl -n resilience-lab rollout status deployment/payment-api --timeout=60s
